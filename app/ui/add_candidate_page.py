@@ -296,8 +296,11 @@ def _render_bulk_import():
             return None
 
         def clean_phone(phone):
-            if not phone or pd.isna(phone):
-                return ""
+            try:
+                if not phone or pd.isna(phone):
+                    return ""
+            except Exception:
+                pass
             phone = str(phone).strip()
             # Remove all non-digit characters
             phone = re.sub(r'\D', '', phone)
@@ -332,19 +335,37 @@ def _render_bulk_import():
 
         try:
             import openpyxl
-            wb = openpyxl.load_workbook(uploaded, data_only=True)
+            import io
+            file_bytes = uploaded.read()
             xl = {}
-            for sheet in wb.sheetnames:
-                ws = wb[sheet]
-                data = ws.values
-                cols = next(data, None)
-                if cols is None:
+            wb = None
+            for kwargs in [
+                {"data_only": True, "keep_links": False},
+                {"data_only": True, "keep_links": False, "keep_vba": False},
+                {"data_only": True},
+            ]:
+                try:
+                    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), **kwargs)
+                    break
+                except Exception:
                     continue
-                cols = [str(c).strip() if c is not None and str(c).strip() not in ['', 'None'] else f"col_{i}" for i, c in enumerate(cols)]
-                rows = []
-                for row in data:
-                    rows.append([str(v).strip() if v is not None else "" for v in row])
-                xl[sheet] = pd.DataFrame(rows, columns=cols)
+            if wb is None:
+                st.error("Could not open the Excel file. Please re-save it in Excel and try again.")
+                return
+            for sheet in wb.sheetnames:
+                try:
+                    ws = wb[sheet]
+                    data = list(ws.values)
+                    if not data:
+                        continue
+                    cols_raw = data[0]
+                    cols = [str(c).strip() if c is not None and str(c).strip() not in ['', 'None'] else f"col_{i}" for i, c in enumerate(cols_raw)]
+                    rows = []
+                    for row in data[1:]:
+                        rows.append([str(v).strip() if v is not None else "" for v in row])
+                    xl[sheet] = pd.DataFrame(rows, columns=cols)
+                except Exception:
+                    continue
         except Exception as e:
             st.error(f"Error reading file: {e}")
             return
