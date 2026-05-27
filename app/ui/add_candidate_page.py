@@ -331,7 +331,20 @@ def _render_bulk_import():
             return 'Pending'
 
         try:
-            xl = pd.read_excel(uploaded, sheet_name=None)
+            import openpyxl
+            wb = openpyxl.load_workbook(uploaded, data_only=True)
+            xl = {}
+            for sheet in wb.sheetnames:
+                ws = wb[sheet]
+                data = ws.values
+                cols = next(data, None)
+                if cols is None:
+                    continue
+                cols = [str(c).strip() if c is not None and str(c).strip() not in ['', 'None'] else f"col_{i}" for i, c in enumerate(cols)]
+                rows = []
+                for row in data:
+                    rows.append([str(v).strip() if v is not None else "" for v in row])
+                xl[sheet] = pd.DataFrame(rows, columns=cols)
         except Exception as e:
             st.error(f"Error reading file: {e}")
             return
