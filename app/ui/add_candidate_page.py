@@ -279,8 +279,11 @@ def _render_bulk_import():
 
     if uploaded:
         def parse_date(date_str):
-            if not date_str or pd.isna(date_str):
-                return None
+            try:
+                if not date_str or pd.isna(date_str):
+                    return None
+            except Exception:
+                pass
             date_str = str(date_str).strip()
             date_str = re.sub(r'(\d+)(st|nd|rd|th)', r'\1', date_str, flags=re.IGNORECASE)
             date_str = date_str.strip()
@@ -320,7 +323,11 @@ def _render_bulk_import():
             return phone if phone else ""
 
         def map_status(s):
-            if not s or pd.isna(s): return 'Selected'
+            try:
+                if not s or pd.isna(s): return 'Selected'
+            except Exception:
+                pass
+            if not s: return 'Selected'
             s = str(s).strip().lower()
             if 'drop' in s: return 'Drop'
             if 'paid' in s: return 'Payment Received'
@@ -328,7 +335,11 @@ def _render_bulk_import():
             return 'Selected'
 
         def map_payment(s):
-            if not s or pd.isna(s): return 'Pending'
+            try:
+                if not s or pd.isna(s): return 'Pending'
+            except Exception:
+                pass
+            if not s: return 'Pending'
             s = str(s).strip().lower()
             if s == 'paid': return 'Received'
             return 'Pending'
