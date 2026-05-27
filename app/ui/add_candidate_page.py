@@ -278,12 +278,19 @@ def _render_bulk_import():
     uploaded = st.file_uploader("Upload Excel File", type=["xlsx", "xls"])
 
     if uploaded:
-        def parse_date(date_str):
+        def safe_val(v):
             try:
-                if not date_str or pd.isna(date_str):
-                    return None
+                if v is None: return ""
+                s = str(v).strip()
+                if s.lower() in ['nan', 'none', 'nat', '']: return ""
+                return s
             except Exception:
-                pass
+                return ""
+
+        def parse_date(date_str):
+            date_str = safe_val(date_str)
+            if not date_str:
+                return None
             date_str = str(date_str).strip()
             date_str = re.sub(r'(\d+)(st|nd|rd|th)', r'\1', date_str, flags=re.IGNORECASE)
             date_str = date_str.strip()
@@ -299,11 +306,9 @@ def _render_bulk_import():
             return None
 
         def clean_phone(phone):
-            try:
-                if not phone or pd.isna(phone):
-                    return ""
-            except Exception:
-                pass
+            phone = safe_val(phone)
+            if not phone:
+                return ""
             phone = str(phone).strip()
             # Remove all non-digit characters
             phone = re.sub(r'\D', '', phone)
@@ -323,24 +328,18 @@ def _render_bulk_import():
             return phone if phone else ""
 
         def map_status(s):
-            try:
-                if not s or pd.isna(s): return 'Selected'
-            except Exception:
-                pass
+            s = safe_val(s)
             if not s: return 'Selected'
-            s = str(s).strip().lower()
+            s = s.strip().lower()
             if 'drop' in s: return 'Drop'
             if 'paid' in s: return 'Payment Received'
             if 'join' in s: return 'Joined'
             return 'Selected'
 
         def map_payment(s):
-            try:
-                if not s or pd.isna(s): return 'Pending'
-            except Exception:
-                pass
+            s = safe_val(s)
             if not s: return 'Pending'
-            s = str(s).strip().lower()
+            s = s.strip().lower()
             if s == 'paid': return 'Received'
             return 'Pending'
 
@@ -392,6 +391,7 @@ def _render_bulk_import():
             sheet_count = 0
 
             for _, row in df.iterrows():
+                row = {k: (str(v).strip() if v is not None and str(v).strip().lower() not in ['nan','none','nat'] else '') for k, v in row.items()}
                 name_col = next((c for c in df.columns if c.startswith('name')), None)
                 name = str(row.get(name_col, '')).strip()
                 if not name or name.lower() in ['nan', 'none', '']:
