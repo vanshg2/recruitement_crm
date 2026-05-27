@@ -1,0 +1,14 @@
+streamlit==1.32.0
+sqlalchemy==2.0.28
+pymysql==1.1.0
+pandas==2.2.1
+plotly==5.20.0
+apscheduler==3.10.4
+bcrypt==4.1.2
+openpyxl==3.1.2
+pillow==10.2.0
+python-dotenv==1.0.1
+streamlit-option-menu==0.3.12
+streamlit-extras==0.4.2
+cryptography==42.0.5
+reportlab==4.1.0
