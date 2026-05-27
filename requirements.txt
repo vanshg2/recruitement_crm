@@ -12,3 +12,4 @@ streamlit-option-menu==0.3.12
 streamlit-extras==0.4.2
 cryptography==42.0.5
 reportlab==4.1.0
+lxml==5.2.1
