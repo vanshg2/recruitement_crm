@@ -1,9 +1,19 @@
 """
 Login Page UI
-CRM
+BLACKWOODS CRM
 """
 
 import streamlit as st
+import base64
+import os
+
+
+def get_logo_b64():
+    try:
+        with open("images/logo.png", "rb") as f:
+            return base64.b64encode(f.read()).decode()
+    except:
+        return None
 
 
 def render_login():
@@ -12,9 +22,25 @@ def render_login():
     with col2:
         st.markdown("<br><br>", unsafe_allow_html=True)
 
+        logo_b64 = get_logo_b64()
+
+        # Logo / Brand
+        if logo_b64:
+            logo_html = f'<img src="data:image/png;base64,{logo_b64}" style="height:80px; width:auto; display:block; margin:0 auto 1rem;">'
+        else:
+            logo_html = '<div style="font-size:3rem; text-align:center; margin-bottom:1rem;">🎯</div>'
+
         st.markdown(f"""
         <div style="text-align:center; margin-bottom: 2rem;">
-            <div style="font-size:2rem; font-weight:900; color:#3B82F6; text-align:center; letter-spacing:0.08em; margin-bottom:1rem;">CRM</div>
+            {logo_html}
+            <h1 style="
+                font-family: 'Plus Jakarta Sans', sans-serif;
+                font-size: 1.75rem;
+                font-weight: 800;
+                color: #F1F5F9;
+                margin: 0.75rem 0 0;
+                letter-spacing: -0.02em;
+            ">BLACKWOODS CRM</h1>
             <p style="
                 color: #64748B;
                 font-size: 0.875rem;
@@ -48,6 +74,6 @@ def render_login():
 
         st.markdown("""
         <div style="text-align:center; margin-top: 1.5rem; color: #9CA3AF; font-size: 0.75rem;">
-            © 2025 CRM. All rights reserved.
+            © 2024 Blackwoods. All rights reserved.
         </div>
         """, unsafe_allow_html=True)
