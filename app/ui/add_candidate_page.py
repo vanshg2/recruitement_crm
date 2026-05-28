@@ -529,6 +529,53 @@ def _render_bulk_import():
         "Review the mapping below and fix anything before importing."
     )
 
+    # ── Data source selector ───────────────────────────────────
+    st.markdown("### 📋 Who is providing this data?")
+    data_source = st.radio(
+        "Select data source",
+        options=["🏢 Sent by Hiring Company", "🗂️ Our Internal Database"],
+        horizontal=True,
+        key="bulk_data_source",
+        help=(
+            "Hiring Company: file sent by the client — system will auto-assign all candidates to that company.\n"
+            "Internal Database: our own records — company is taken from the file per candidate."
+        )
+    )
+    is_company_file = data_source == "🏢 Sent by Hiring Company"
+
+    # If hiring company file — ask which company
+    forced_company_id = None
+    forced_company_name = None
+    if is_company_file:
+        with get_db() as db:
+            companies = db.query(Company).filter(Company.is_active == True).order_by(Company.name).all()
+            company_map = {c.name: c.id for c in companies}
+
+        company_names = list(company_map.keys())
+        col_comp, col_new = st.columns([3, 1])
+        with col_comp:
+            selected_company = st.selectbox(
+                "Select the hiring company that sent this file",
+                options=["— select company —"] + company_names,
+                key="bulk_forced_company"
+            )
+        with col_new:
+            st.markdown("<br>", unsafe_allow_html=True)
+            add_new = st.checkbox("Add new company", key="bulk_add_new_company")
+
+        if add_new:
+            new_company_name = st.text_input("New company name", key="bulk_new_company_name")
+            if new_company_name.strip():
+                forced_company_name = new_company_name.strip()
+                st.success(f"Will create and use: **{forced_company_name}**")
+        elif selected_company != "— select company —":
+            forced_company_name = selected_company
+            forced_company_id = company_map[selected_company]
+            st.success(f"All candidates will be assigned to: **{forced_company_name}**")
+        else:
+            st.warning("Please select a company before uploading.")
+            return
+
     uploaded = st.file_uploader("Upload Excel / CSV File", type=["xlsx", "xls", "csv"])
     if not uploaded:
         return
@@ -742,7 +789,8 @@ def _render_bulk_import():
             all_records.append({
                 "name":           name,
                 "phone":          phone,
-                "company":        safe_val(get("company")),
+                "company":        forced_company_name if is_company_file else safe_val(get("company")),
+                "forced_company_id": forced_company_id if is_company_file else None,
                 "designation":    safe_val(get("designation")),
                 "recruiter_name": safe_val(get("recruiter_name")),
                 "selection_date": parse_date(get("selection_date")),
@@ -806,8 +854,8 @@ def _render_bulk_import():
                         session.close()
                         continue
 
-                company_id = None
-                if rec["company"]:
+                company_id = rec.get("forced_company_id")
+                if company_id is None and rec["company"]:
                     ck = rec["company"].lower()
                     for cn, cid in companies_cache.items():
                         if ck[:8] in cn or cn[:8] in ck:
