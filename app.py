@@ -397,8 +397,8 @@ else:
     </div>
     """, unsafe_allow_html=True)
 
-    # Navigation Buttons
-    nav_cols = st.columns(len(pages))
+    # Navigation Buttons + Sign Out in one row
+    nav_cols = st.columns(len(pages) + 1)
     for idx, page in enumerate(pages):
         with nav_cols[idx]:
             is_active = current == page
@@ -412,11 +412,7 @@ else:
                 st.session_state.current_page = page
                 st.rerun()
 
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # Sign Out
-    cols = st.columns(9)
-    with cols[8]:
+    with nav_cols[-1]:
         if st.button("🚪 Sign Out", use_container_width=True):
             logout()
 
