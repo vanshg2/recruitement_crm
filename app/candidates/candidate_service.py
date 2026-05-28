@@ -258,12 +258,10 @@ def update_candidate_day_tracking() -> int:
         with get_db() as db:
             joined_candidates = db.query(Candidate).filter(
                 Candidate.joining_date.isnot(None),
-                Candidate.status.in_([
-                    CandidateStatus.JOINED,
-                    CandidateStatus.COMPLETED_30,
-                    CandidateStatus.COMPLETED_60,
-                    CandidateStatus.COMPLETED_90,
-                    CandidateStatus.PAYMENT_PENDING,
+                Candidate.joining_date <= today,  # only past/present joining dates
+                Candidate.status.notin_([
+                    CandidateStatus.DROP,
+                    CandidateStatus.PAYMENT_RECEIVED,
                 ])
             ).all()
 

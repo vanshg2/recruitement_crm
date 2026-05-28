@@ -1,6 +1,6 @@
 """
 Payments Tracking Page
-CRM
+BLACKWOODS CRM
 """
 
 import streamlit as st
@@ -28,6 +28,17 @@ def render_payments():
     <div class="page-title">💰 Payment Tracking</div>
     <div class="page-subtitle">Track which companies have paid and which ones still need to pay.</div>
     """, unsafe_allow_html=True)
+
+    # ── Manual eligibility refresh ─────────────────────────────
+    col_info, col_btn = st.columns([4, 1])
+    with col_info:
+        st.caption("Only candidates who have completed 90+ days at their company appear here.")
+    with col_btn:
+        if st.button("🔄 Refresh Eligibility", use_container_width=True, help="Recalculate 90-day eligibility for all candidates right now"):
+            from app.utils.scheduler import run_day_tracking_now
+            run_day_tracking_now()
+            st.success("✅ Eligibility updated!")
+            st.rerun()
 
     with get_db() as db:
         total_pending = db.query(func.sum(Candidate.payment_amount)).filter(
@@ -212,7 +223,7 @@ def _render_pending_payments():
                 f"As per our agreement, the placement fee of Rs.{amount_str} "
                 f"is now due.\n\n"
                 f"Kindly arrange the payment at the earliest.\n\n"
-                f"Thank you,\nCRM Team"
+                f"Thank you,\nBlackwoods Team"
             )
             company_email = row["company_email"]
             gmail_url = f"https://mail.google.com/mail/?view=cm&to={company_email}&su={email_subject}&body={email_body}"
