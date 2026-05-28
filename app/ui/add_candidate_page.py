@@ -503,22 +503,10 @@ def _render_bulk_import():
 
     def resolve_payment(payout_val, status_val):
         """
-        Resolve payment status.
-        Skip if payout value is actually a status signal.
-        Numeric payout values = amount, not status → default Pending.
+        Always import as Pending — payment confirmation must be done
+        manually in the CRM. The Payout column in client files is just
+        the client's claim; it should not auto-mark as Received.
         """
-        pv = _norm(safe_val(payout_val))
-        if not pv:
-            return "Pending"
-        # Payout value is a status, not a payment
-        if pv in PAYOUT_IS_STATUS:
-            return "Pending"
-        # Numeric value = payout amount, not payment status
-        if re.match(r"^\d+(\.\d+)?$", pv.replace(" ", "")):
-            return "Pending"
-        for key, crm_val in PAYOUT_AS_PAYMENT.items():
-            if key in pv:
-                return crm_val
         return "Pending"
 
     # ═══════════════════════════════════════════════════════════
