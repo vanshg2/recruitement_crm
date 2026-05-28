@@ -225,7 +225,7 @@ def get_all_candidates(
                 "ctc": c.ctc or 0,
                 "selection_date": c.selection_date,
                 "joining_date": c.joining_date,
-                "days_since_joining": max(days, 0) if c.joining_date else None,
+                "days_since_joining": days if c.joining_date and days > 0 else None,
                 "is_90_day_eligible": c.is_90_day_eligible,
                 "notes": c.notes or "",
                 "created_at": c.created_at,
