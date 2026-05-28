@@ -73,7 +73,7 @@ html, body, [class*="css"] {
 .stDeployButton { display: none !important; }
 
 .main .block-container {
-    padding: 0.5rem 2rem 2rem !important;
+    padding: 0rem 2rem 2rem !important;
     max-width: 1600px !important;
 }
 
