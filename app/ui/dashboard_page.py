@@ -97,13 +97,11 @@ def render_dashboard():
     with c2:
         if is_admin():
             kpi_card("✅", "Amount Received", kpis["received_payment"], variant="green", prefix="₹")
-    with c3:
-        kpi_card("📅", "Joined This Month", kpis["month_joins"], variant="blue")
-    else:
-            kpi_card("✅", "Currently Working", kpis["joined_candidates"], variant="green")
     with c4:
         if is_admin():
-            kpi_card("📈", "This Month Earnings", kpis["month_revenue"], variant="green", prefix="₹")    
+            kpi_card("📈", "This Month Earnings", kpis["month_revenue"], variant="green", prefix="₹")
+    else:
+            kpi_card("✅", "Currently Working", kpis["joined_candidates"], variant="green")
     with c5:
         kpi_card("🔔", "New Alerts", kpis["unread_notifications"], variant="purple")
 
