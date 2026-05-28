@@ -353,7 +353,7 @@ else:
     if st.session_state.get("role") == "admin":
         pages = ["Dashboard", "Candidates", "Add Candidate",
                  "Recruiters", "Payments", "Companies",
-                 "Notifications", "Settings"]
+                 "Notifications", "Smart Import", "Settings"]
         icons = {
             "Dashboard":     "🏠",
             "Candidates":    "👥",
@@ -362,6 +362,7 @@ else:
             "Payments":      "💰",
             "Companies":     "🏢",
             "Notifications": "🔔",
+            "Smart Import":  "📥",
             "Settings":      "⚙️",
         }
     else:
@@ -442,6 +443,7 @@ else:
         "Payments":      render_payments,
         "Companies":     render_companies,
         "Notifications": render_notifications,
+        "Smart Import":  render_smart_import_page,
         "Settings":      render_settings,
     }
 

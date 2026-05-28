@@ -1,168 +1,199 @@
 """
-Blackwoods Excel Importer
-Reads your company's actual Excel format and imports into BLACKWOODS CRM
-Run: python import_blackwoods.py
+Blackwoods Excel Importer — v2 (Variable Format)
+Accepts any column naming convention. Uses fuzzy matching + synonym lookup.
+Run: python import_blackwoods.py [path_to_file.xlsx]
 """
 
-import sys
-import os
-import re
+import sys, os, re
 import pandas as pd
 from datetime import datetime, date
+from difflib import SequenceMatcher
 
-# Add project to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-def parse_date(date_str):
-    """Parse dates like '11th April 2024', '2nd October', '3rd January 2025'"""
-    if not date_str or pd.isna(date_str):
+# ─────────────────────────────────────────────────────────────
+# SYNONYM TABLE
+# Maps CRM field key → list of accepted column name fragments (lowercase)
+# ─────────────────────────────────────────────────────────────
+SYNONYMS = {
+    "name":           ["name", "full name", "candidate name", "applicant", "person"],
+    "phone":          ["phone", "mobile", "number", "contact", "ph", "mob", "cell", "whatsapp"],
+    "company":        ["company", "organisation", "organization", "client", "employer", "firm"],
+    "designation":    ["designation", "process", "procecss", "role", "position", "job title", "post"],
+    "recruiter_name": ["recruiter", "rec", "sourced by", "consultant", "hired by"],
+    "selection_date": ["selection", "selected on", "select date", "date of selection", "dos"],
+    "joining_date":   ["joining", "doj", "date of joining", "join date"],
+    "status":         ["status", "stage", "current status", "pipeline"],
+    "payment_status": ["payout", "pay out", "payment", "payment status", "invoice"],
+    "email":          ["email", "e-mail", "mail", "email id"],
+    "location":       ["location", "city", "place", "area", "region"],
+}
+
+
+def _norm(s: str) -> str:
+    return re.sub(r"[^a-z0-9 ]", " ", str(s).lower()).strip()
+
+
+def _score(col: str, synonym: str) -> float:
+    cn, sn = _norm(col), _norm(synonym)
+    ratio = SequenceMatcher(None, cn, sn).ratio()
+    if sn in cn or cn in sn:
+        ratio = max(ratio, 0.85)
+    return ratio
+
+
+def detect_columns(df_columns: list) -> dict:
+    """
+    Auto-detect CRM field → actual column name mapping.
+    Returns {crm_field: actual_col_name} for matched fields.
+    """
+    mapping = {}
+    used_cols = set()
+
+    for field, synonyms in SYNONYMS.items():
+        best_col, best_score = None, 0.0
+        for col in df_columns:
+            if col in used_cols:
+                continue
+            for syn in synonyms:
+                s = _score(col, syn)
+                if s > best_score:
+                    best_score = s
+                    best_col = col
+        if best_score >= 0.60 and best_col:
+            mapping[field] = best_col
+            used_cols.add(best_col)
+
+    return mapping
+
+
+def parse_date(val):
+    if not val or pd.isna(val):
         return None
-    date_str = str(date_str).strip()
-    date_str = re.sub(r'(\d+)(st|nd|rd|th)', r'\1', date_str, flags=re.IGNORECASE)
-    date_str = date_str.strip()
-    formats = ['%d %B %Y', '%d %b %Y', '%d %B', '%d %b']
-    for fmt in formats:
+    s = re.sub(r"(\d+)(st|nd|rd|th)", r"\1", str(val).strip(), flags=re.IGNORECASE).strip()
+    for fmt in ["%d %B %Y", "%d %b %Y", "%Y-%m-%d", "%d/%m/%Y",
+                "%m/%d/%Y", "%d-%m-%Y", "%d %B", "%d %b"]:
         try:
-            d = datetime.strptime(date_str, fmt)
-            if d.year == 1900:
-                d = d.replace(year=datetime.now().year)
-            return d.date()
-        except:
+            d = datetime.strptime(s, fmt)
+            return d.replace(year=datetime.now().year).date() if d.year == 1900 else d.date()
+        except Exception:
             continue
     return None
 
 
-def clean_phone(phone):
-    """Clean phone numbers - remove spaces, dashes, brackets"""
-    if not phone or pd.isna(phone):
+def clean_phone(val) -> str:
+    if not val or pd.isna(val):
         return ""
-    phone = str(phone).strip()
-    phone = re.sub(r'[\s\-\(\)\+]', '', phone)
-    phone = re.sub(r'^91', '', phone)
-    if len(phone) >= 10:
-        return phone[-10:]
-    return phone
+    s = re.sub(r"[\s\-\(\)\+]", "", str(val))
+    s = re.sub(r"^91", "", s)
+    return s[-10:] if len(s) >= 10 else s
 
 
-def map_status(status_str):
-    """Map Excel status to CRM status"""
-    if not status_str or pd.isna(status_str):
-        return 'Selected'
-    s = str(status_str).strip().lower()
-    if 'drop' in s:
-        return 'Drop'
-    elif 'paid' in s:
-        return 'Payment Received'
-    elif 'join' in s:
-        return 'Joined'
-    elif 'active' in s or 'pending' in s:
-        return 'Selected'
-    return 'Selected'
+def map_status(val) -> str:
+    if not val or pd.isna(val):
+        return "Selected"
+    s = str(val).strip().lower()
+    if "drop" in s:  return "Drop"
+    if "paid" in s:  return "Payment Received"
+    if "join" in s:  return "Joined"
+    return "Selected"
 
 
-def map_payment(payout_str):
-    """Map payout to payment status"""
-    if not payout_str or pd.isna(payout_str):
-        return 'Pending'
-    s = str(payout_str).strip().lower()
-    if s == 'paid':
-        return 'Received'
-    elif 'unpaid' in s or 'pending' in s:
-        return 'Pending'
-    return 'Pending'
+def map_payment(val) -> str:
+    if not val or pd.isna(val):
+        return "Pending"
+    s = str(val).strip().lower()
+    if s == "paid":  return "Received"
+    return "Pending"
 
 
 def import_excel(excel_path: str):
     print(f"\n📂 Reading: {excel_path}")
-
     try:
-        xl = pd.read_excel(excel_path, sheet_name=None)
+        if excel_path.endswith(".csv"):
+            xl = {"CSV": pd.read_csv(excel_path)}
+        else:
+            xl = pd.read_excel(excel_path, sheet_name=None)
     except Exception as e:
         print(f"❌ Error reading file: {e}")
         return
 
-    print(f"📋 Found {len(xl)} sheets: {list(xl.keys())}")
-
+    print(f"📋 Found {len(xl)} sheet(s): {list(xl.keys())}")
     all_records = []
 
     for sheet_name, df in xl.items():
-        if sheet_name.strip().lower() == 'collective data':
-            print(f"⏭ Skipping summary sheet: {sheet_name}")
+        if "collective" in sheet_name.strip().lower():
+            print(f"⏭  Skipping summary sheet: {sheet_name}")
             continue
 
-        # Drop completely empty rows
-        df = df.dropna(how='all')
-        print(f"📄 Sheet '{sheet_name}': {len(df)} rows")
+        df = df.dropna(how="all")
+        if df.empty:
+            continue
 
-        # Normalize column names
-        df.columns = [str(c).strip().lower().replace(' ', '_') for c in df.columns]
+        # Normalize column names (strip whitespace, preserve original for display)
+        orig_cols = [str(c).strip() for c in df.columns]
+        df.columns = orig_cols
+
+        print(f"\n📄 Sheet '{sheet_name}': {len(df)} rows")
+        print(f"   Columns found: {orig_cols}")
+
+        # Auto-detect mapping
+        col_map = detect_columns(orig_cols)
+        print(f"   Detected mapping: {col_map}")
+
+        # Warn if required fields not found
+        if "name" not in col_map:
+            print(f"   ⚠️  Cannot find a 'name' column — skipping sheet.")
+            continue
+        if "phone" not in col_map:
+            print(f"   ⚠️  No phone column found — will use placeholder.")
 
         for _, row in df.iterrows():
-            # Name
-            name_col = next((c for c in df.columns if c.startswith('name')), None)
-            name = str(row.get(name_col, '')).strip()
-            if not name or name.lower() in ['nan', 'none', '']:
+            def get(field):
+                col = col_map.get(field)
+                if not col:
+                    return None
+                v = row.get(col)
+                return None if (v is None or (isinstance(v, float) and pd.isna(v))) else v
+
+            name = str(get("name") or "").strip()
+            if not name or name.lower() in ["nan", "none", ""]:
                 continue
 
-            # Phone
-            phone_col = next((c for c in df.columns if 'number' in c), None)
-            phone = clean_phone(row.get(phone_col, '')) if phone_col else ''
+            phone = clean_phone(get("phone"))
             if not phone or len(phone) < 8:
-                phone = '0000000000'
+                phone = "0000000000"
 
-            # Company
-            company_col = next((c for c in df.columns if 'company' in c), None)
-            company = str(row.get(company_col, '')).strip() if company_col else ''
-            if company.lower() in ['nan', 'none']: company = ''
-
-            # Process/Designation
-            process_col = next((c for c in df.columns if 'process' in c or 'procecss' in c), None)
-            process = str(row.get(process_col, '')).strip() if process_col else ''
-            if process.lower() in ['nan', 'none']: process = ''
-
-            # Recruiter
-            rec_col = next((c for c in df.columns if 'recruiter' in c), None)
-            recruiter = str(row.get(rec_col, '')).strip() if rec_col else ''
-            if recruiter.lower() in ['nan', 'none']: recruiter = ''
-
-            # Selection Date
-            date_col = next((c for c in df.columns if 'selection' in c), None)
-            sel_date = parse_date(row.get(date_col, '')) if date_col else None
-
-            # Joining Date
-            join_col = next((c for c in df.columns if 'joining' in c or 'doj' in c), None)
-            join_date = parse_date(row.get(join_col, '')) if join_col else None
-
-            # Status
-            status_col = next((c for c in df.columns if 'status' in c), None)
-            status = map_status(row.get(status_col, '')) if status_col else 'Selected'
-
-            # Payment/Payout
-            pay_col = next((c for c in df.columns if 'payout' in c or 'pay_out' in c), None)
-            payment_status = map_payment(row.get(pay_col, '')) if pay_col else 'Pending'
+            def clean_str(field):
+                v = get(field)
+                if v is None:
+                    return ""
+                s = str(v).strip()
+                return "" if s.lower() in ["nan", "none"] else s
 
             all_records.append({
-                'name': name,
-                'phone': phone,
-                'company': company,
-                'designation': process,
-                'recruiter_name': recruiter,
-                'selection_date': sel_date,
-                'joining_date': join_date,
-                'status': status,
-                'payment_status': payment_status,
-                'source_sheet': sheet_name,
+                "name":           name,
+                "phone":          phone,
+                "company":        clean_str("company"),
+                "designation":    clean_str("designation"),
+                "recruiter_name": clean_str("recruiter_name"),
+                "selection_date": parse_date(get("selection_date")),
+                "joining_date":   parse_date(get("joining_date")),
+                "status":         map_status(get("status")),
+                "payment_status": map_payment(get("payment_status")),
+                "source_sheet":   sheet_name,
             })
 
     print(f"\n✅ Total records parsed: {len(all_records)}")
+    if not all_records:
+        print("Nothing to import.")
+        return
 
-    # Preview
-    preview_df = pd.DataFrame(all_records)
+    preview = pd.DataFrame(all_records)
     print("\n📊 Preview (first 10):")
-    print(preview_df[['name', 'phone', 'company', 'recruiter_name', 'status', 'payment_status']].head(10).to_string())
+    print(preview[["name", "phone", "company", "recruiter_name", "status"]].head(10).to_string())
 
-    # Now import into CRM database
-    print("\n🚀 Importing into CRM database...")
+    print("\n🚀 Importing into CRM database…")
     _import_to_db(all_records)
 
 
@@ -172,100 +203,71 @@ def _import_to_db(records: list):
         Candidate, Company, Recruiter, User,
         CandidateStatus, PaymentStatus
     )
-    from datetime import date
 
-    success = 0
-    failed = 0
-    skipped = 0
-
-    # Cache companies and recruiters
+    success = failed = skipped = 0
     session = get_db_session()
-    companies_cache = {}
-    for c in session.query(Company).all():
-        companies_cache[c.name.lower()] = c.id
-
+    companies_cache = {c.name.lower(): c.id for c in session.query(Company).all()}
     recruiters_cache = {}
-    for r, name in session.query(Recruiter, User.full_name).join(User, Recruiter.user_id == User.id).all():
-        recruiters_cache[name.lower()] = r.id
-
-    # Get max existing candidate number to avoid duplicates
+    for r, uname in session.query(Recruiter, User.full_name).join(User, Recruiter.user_id == User.id).all():
+        recruiters_cache[uname.lower()] = r.id
     last = session.query(Candidate).order_by(Candidate.id.desc()).first()
     counter = (last.id + 1000) if last else 1000
     session.close()
 
     for i, rec in enumerate(records):
-        # Each record gets its own session to avoid cascade failures
         session = get_db_session()
         try:
-            # Skip duplicate phones
-            phone = rec['phone']
-            if phone != '0000000000':
-                existing = session.query(Candidate).filter(Candidate.phone == phone).first()
-                if existing:
+            phone = rec["phone"]
+            if phone != "0000000000":
+                if session.query(Candidate).filter(Candidate.phone == phone).first():
                     skipped += 1
                     session.close()
                     continue
 
-            # Find or create company
             company_id = None
-            if rec['company']:
-                comp_key = rec['company'].lower()
-                for cached_name, cached_id in companies_cache.items():
-                    if comp_key[:8] in cached_name or cached_name[:8] in comp_key:
-                        company_id = cached_id
+            if rec["company"]:
+                ck = rec["company"].lower()
+                for cn, cid in companies_cache.items():
+                    if ck[:8] in cn or cn[:8] in ck:
+                        company_id = cid
                         break
-                if not company_id and rec['company']:
-                    new_comp = Company(name=rec['company'], is_active=True)
-                    session.add(new_comp)
-                    session.flush()
-                    company_id = new_comp.id
-                    companies_cache[rec['company'].lower()] = company_id
+                if not company_id:
+                    new_c = Company(name=rec["company"], is_active=True)
+                    session.add(new_c); session.flush()
+                    company_id = new_c.id
+                    companies_cache[rec["company"].lower()] = company_id
 
-            # Find recruiter
             recruiter_id = None
-            if rec['recruiter_name']:
-                rec_key = rec['recruiter_name'].lower()
-                for cached_name, cached_id in recruiters_cache.items():
-                    if rec_key in cached_name or cached_name in rec_key:
-                        recruiter_id = cached_id
+            if rec["recruiter_name"]:
+                rk = rec["recruiter_name"].lower()
+                for rn, rid in recruiters_cache.items():
+                    if rk in rn or rn in rk:
+                        recruiter_id = rid
                         break
 
-            # Generate unique candidate ID
             counter += 1
             cid = f"CND{str(counter).zfill(5)}"
-
-            # Make sure ID doesn't exist
             while session.query(Candidate).filter(Candidate.candidate_id == cid).first():
                 counter += 1
                 cid = f"CND{str(counter).zfill(5)}"
 
-            # Map status
-            try:
-                status = CandidateStatus(rec['status'])
-            except:
-                status = CandidateStatus.SELECTED
+            try:   status = CandidateStatus(rec["status"])
+            except: status = CandidateStatus.SELECTED
+            try:   pay_status = PaymentStatus(rec["payment_status"])
+            except: pay_status = PaymentStatus.PENDING
 
-            # Map payment status
-            try:
-                pay_status = PaymentStatus(rec['payment_status'])
-            except:
-                pay_status = PaymentStatus.PENDING
-
-            # Check 90-day eligibility
-            is_eligible = False
-            if rec['joining_date']:
-                days = (date.today() - rec['joining_date']).days
-                is_eligible = days >= 90
+            joining = rec["joining_date"]
+            is_eligible = (date.today() - joining).days >= 90 if joining else False
 
             candidate = Candidate(
                 candidate_id=cid,
-                name=rec['name'],
-                phone=rec['phone'],
+                name=rec["name"],
+                phone=phone,
                 company_id=company_id,
                 recruiter_id=recruiter_id,
-                designation=rec['designation'],
-                selection_date=rec['selection_date'],
-                joining_date=rec['joining_date'],
+                designation=rec["designation"] or None,
+                selection_date=rec["selection_date"],
+                joining_date=joining,
                 status=status,
                 payment_status=pay_status,
                 is_90_day_eligible=is_eligible,
@@ -274,49 +276,28 @@ def _import_to_db(records: list):
             session.add(candidate)
             session.commit()
             success += 1
-
             if success % 20 == 0:
-                print(f"  ✅ Imported {success} records so far...")
+                print(f"  ✅ Imported {success} so far…")
 
         except Exception as e:
             session.rollback()
             failed += 1
-            print(f"  ❌ Row {i+1} ({rec.get('name','?')}) failed: {str(e)[:100]}")
+            print(f"  ❌ Row {i+1} ({rec.get('name','?')}) failed: {str(e)[:120]}")
         finally:
             session.close()
 
     print(f"\n{'='*40}")
-    print(f"✅ Successfully imported: {success}")
-    print(f"⏭ Skipped (duplicates):  {skipped}")
-    print(f"❌ Failed:               {failed}")
+    print(f"✅ Imported:           {success}")
+    print(f"⏭  Skipped (dupes):   {skipped}")
+    print(f"❌ Failed:             {failed}")
     print(f"{'='*40}")
-    print("🎉 Import complete! Open the CRM to see your data.")
+    print("🎉 Import complete!")
+
 
 if __name__ == "__main__":
-    import sys
-
-    if len(sys.argv) > 1:
-        excel_path = sys.argv[1]
-    else:
-        # Default path
-        excel_path = r"Selection_data.xlsx"
-
-    if not os.path.exists(excel_path):
-        print(f"""
-❌ File not found: {excel_path}
-
-USAGE:
-  python import_blackwoods.py <path_to_excel_file>
-
-EXAMPLE:
-  python import_blackwoods.py "Selection_data.xlsx"
-
-Or copy your Excel file to the project folder and rename it to:
-  Selection_data.xlsx
-
-Then run:
-  python import_blackwoods.py
-        """)
+    path = sys.argv[1] if len(sys.argv) > 1 else "Selection_data.xlsx"
+    if not os.path.exists(path):
+        print(f"\n❌ File not found: {path}")
+        print("\nUSAGE:  python import_blackwoods.py <file.xlsx or file.csv>")
         sys.exit(1)
-
-    import_excel(excel_path)
+    import_excel(path)
