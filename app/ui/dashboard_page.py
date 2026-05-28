@@ -129,7 +129,6 @@ def render_dashboard():
                 yaxis=dict(showgrid=True, gridcolor="#1E293B", title="Joins", color="#94A3B8"),
                 yaxis2=dict(showgrid=False, title="Revenue (₹)" if admin else "", color="#94A3B8"),
                 barmode="group",
-                plot_bgcolor="#0F172A",
             )
             st.plotly_chart(fig, use_container_width=True)
         else:
@@ -189,7 +188,6 @@ def render_dashboard():
                     **CHART_LAYOUT, height=300, barmode="stack",
                     xaxis=dict(showgrid=True, gridcolor="#1E293B", tickprefix="₹", color="#94A3B8"),
                     yaxis=dict(showgrid=False, color="#94A3B8"),
-                    plot_bgcolor="#0F172A",
                 )
                 st.plotly_chart(fig, use_container_width=True)
             else:
@@ -214,7 +212,6 @@ def render_dashboard():
                 **CHART_LAYOUT, height=300,
                 xaxis=dict(showgrid=False, tickangle=-20, color="#94A3B8"),
                 yaxis=dict(showgrid=True, gridcolor="#1E293B", color="#94A3B8"),
-                plot_bgcolor="#0F172A",
             )
             st.plotly_chart(fig, use_container_width=True)
         else:
