@@ -271,298 +271,287 @@ def _render_candidate_form(is_edit: bool):
 
 def _render_bulk_import():
     import re
+    import io
     from datetime import datetime as dt
+    from difflib import SequenceMatcher
 
-    st.info("📤 Upload your Blackwoods Excel file — all monthly sheets will be imported automatically.")
+    SYNONYMS = {
+        "name":           ["name", "full name", "candidate name", "applicant", "person", "candidate"],
+        "phone":          ["phone", "mobile", "number", "contact", "ph", "mob", "cell", "whatsapp", "phone no", "mobile no", "contact no"],
+        "company":        ["company", "organisation", "organization", "client", "employer", "firm"],
+        "designation":    ["designation", "process", "procecss", "role", "position", "job title", "post", "profile"],
+        "recruiter_name": ["recruiter", "rec", "sourced by", "consultant", "hired by"],
+        "selection_date": ["selection", "selected on", "select date", "date of selection", "dos"],
+        "joining_date":   ["joining", "doj", "date of joining", "join date", "joining date"],
+        "status":         ["status", "stage", "current status", "pipeline"],
+        "payment_status": ["payout", "pay out", "payment", "payment status", "pay out"],
+    }
 
-    uploaded = st.file_uploader("Upload Excel File", type=["xlsx", "xls"])
+    def _norm(s):
+        return re.sub(r"[^a-z0-9 ]", " ", str(s).lower()).strip()
 
-    if uploaded:
-        def safe_val(v):
-            try:
-                if v is None: return ""
-                s = str(v).strip()
-                if s.lower() in ['nan', 'none', 'nat', '']: return ""
-                return s
-            except Exception:
-                return ""
+    def _score(col, syn):
+        cn, sn = _norm(col), _norm(syn)
+        ratio = SequenceMatcher(None, cn, sn).ratio()
+        if sn in cn or cn in sn:
+            ratio = max(ratio, 0.85)
+        return ratio
 
-        def parse_date(date_str):
-            date_str = safe_val(date_str)
-            if not date_str:
-                return None
-            date_str = str(date_str).strip()
-            date_str = re.sub(r'(\d+)(st|nd|rd|th)', r'\1', date_str, flags=re.IGNORECASE)
-            date_str = date_str.strip()
-            formats = ['%d %B %Y', '%d %b %Y', '%d %B', '%d %b']
-            for fmt in formats:
-                try:
-                    d = dt.strptime(date_str, fmt)
-                    if d.year == 1900:
-                        d = d.replace(year=dt.now().year)
-                    return d.date()
-                except:
+    def detect_columns(cols):
+        mapping = {}
+        used = set()
+        for field, syns in SYNONYMS.items():
+            best_col, best_score = None, 0.0
+            for col in cols:
+                if col in used:
                     continue
-            return None
+                for syn in syns:
+                    s = _score(col, syn)
+                    if s > best_score:
+                        best_score = s
+                        best_col = col
+            if best_score >= 0.60 and best_col:
+                mapping[field] = best_col
+                used.add(best_col)
+        return mapping
 
-        def clean_phone(phone):
-            phone = safe_val(phone)
-            if not phone:
-                return ""
-            phone = str(phone).strip()
-            # Remove all non-digit characters
-            phone = re.sub(r'\D', '', phone)
-            # Remove leading 91 (country code)
-            if phone.startswith('91') and len(phone) == 12:
-                phone = phone[2:]
-            # Remove leading 0
-            if phone.startswith('0') and len(phone) == 11:
-                phone = phone[1:]
-            # Return if valid 10 digit number
-            if len(phone) == 10:
-                return phone
-            # If longer, take last 10 digits
-            if len(phone) > 10:
-                return phone[-10:]
-            # Return whatever we have if short
-            return phone if phone else ""
-
-        def map_status(s):
-            s = safe_val(s)
-            if not s: return 'Selected'
-            s = s.strip().lower()
-            if 'drop' in s: return 'Drop'
-            if 'paid' in s: return 'Payment Received'
-            if 'join' in s: return 'Joined'
-            return 'Selected'
-
-        def map_payment(s):
-            s = safe_val(s)
-            if not s: return 'Pending'
-            s = s.strip().lower()
-            if s == 'paid': return 'Received'
-            return 'Pending'
-
+    def safe_val(v):
         try:
+            if v is None: return ""
+            s = str(v).strip()
+            return "" if s.lower() in ["nan", "none", "nat", ""] else s
+        except: return ""
+
+    def parse_date(val):
+        s = safe_val(val)
+        if not s: return None
+        s = re.sub(r"(\d+)(st|nd|rd|th)", r"\1", s, flags=re.IGNORECASE).strip()
+        for fmt in ["%d %B %Y", "%d %b %Y", "%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y", "%d %B", "%d %b"]:
+            try:
+                d = dt.strptime(s, fmt)
+                return d.replace(year=dt.now().year).date() if d.year == 1900 else d.date()
+            except: continue
+        return None
+
+    def clean_phone(val):
+        s = safe_val(val)
+        if not s: return ""
+        s = re.sub(r"\D", "", s)
+        if s.startswith("91") and len(s) == 12: s = s[2:]
+        if s.startswith("0") and len(s) == 11: s = s[1:]
+        return s[-10:] if len(s) >= 10 else s
+
+    def map_status(val):
+        s = safe_val(val).lower()
+        if not s: return "Selected"
+        if "drop" in s: return "Drop"
+        if "paid" in s: return "Payment Received"
+        if "join" in s: return "Joined"
+        return "Selected"
+
+    def map_payment(val):
+        s = safe_val(val).lower()
+        if not s: return "Pending"
+        if s == "paid": return "Received"
+        return "Pending"
+
+    st.info("📤 Upload any Excel or CSV file — column names are detected automatically.")
+
+    uploaded = st.file_uploader("Upload Excel / CSV File", type=["xlsx", "xls", "csv"])
+    if not uploaded:
+        return
+
+    # ── Read file ──────────────────────────────────────────────
+    try:
+        if uploaded.name.endswith(".csv"):
+            xl = {"CSV": pd.read_csv(uploaded)}
+        else:
             import openpyxl
-            import io
             file_bytes = uploaded.read()
-            xl = {}
             wb = None
-            for kwargs in [
-                {"data_only": True, "keep_links": False},
-                {"data_only": True, "keep_links": False, "keep_vba": False},
-                {"data_only": True},
-            ]:
+            for kwargs in [{"data_only": True, "keep_links": False}, {"data_only": True}]:
                 try:
                     wb = openpyxl.load_workbook(io.BytesIO(file_bytes), **kwargs)
                     break
-                except Exception:
-                    continue
+                except: continue
             if wb is None:
-                st.error("Could not open the Excel file. Please re-save it in Excel and try again.")
+                st.error("Could not open the Excel file. Please re-save it and try again.")
                 return
+            xl = {}
             for sheet in wb.sheetnames:
                 try:
                     ws = wb[sheet]
                     data = list(ws.values)
-                    if not data:
-                        continue
+                    if not data: continue
                     cols_raw = data[0]
-                    cols = [str(c).strip() if c is not None and str(c).strip() not in ['', 'None'] else f"col_{i}" for i, c in enumerate(cols_raw)]
-                    rows = []
-                    for row in data[1:]:
-                        rows.append([str(v).strip() if v is not None else "" for v in row])
+                    cols = [str(c).strip() if c is not None and str(c).strip() not in ["", "None"] else f"col_{i}" for i, c in enumerate(cols_raw)]
+                    rows = [[str(v).strip() if v is not None else "" for v in row] for row in data[1:]]
                     xl[sheet] = pd.DataFrame(rows, columns=cols)
-                except Exception:
-                    continue
-        except Exception as e:
-            st.error(f"Error reading file: {e}")
-            return
+                except: continue
+    except Exception as e:
+        st.error(f"Error reading file: {e}")
+        return
 
-        all_records = []
-        sheet_summary = []
+    usable = {k: v for k, v in xl.items() if "collective" not in k.strip().lower() and not v.dropna(how="all").empty}
+    st.success(f"✅ File loaded — {len(usable)} sheet(s): {', '.join(usable.keys())}")
 
-        for sheet_name, df in xl.items():
-            if sheet_name.strip().lower() == 'collective data':
-                continue
-            df = df.dropna(how='all')
-            df.columns = [str(c).strip().lower().replace(' ', '_') for c in df.columns]
-            sheet_count = 0
+    # ── Parse all sheets ───────────────────────────────────────
+    all_records = []
+    sheet_summary = []
 
-            for _, row in df.iterrows():
-                row = {k: (str(v).strip() if v is not None and str(v).strip().lower() not in ['nan','none','nat'] else '') for k, v in row.items()}
-                name_col = next((c for c in df.columns if c.startswith('name')), None)
-                name = str(row.get(name_col, '')).strip()
-                if not name or name.lower() in ['nan', 'none', '']:
-                    continue
+    for sheet_name, df in usable.items():
+        df = df.dropna(how="all")
+        orig_cols = [str(c).strip() for c in df.columns]
+        col_map = detect_columns(orig_cols)
 
-                phone_col = next((c for c in df.columns if 'number' in c), None)
-                phone = clean_phone(row.get(phone_col, '')) if phone_col else ''
-                if not phone or len(phone) < 8:
-                    phone = '0000000000'
+        if "name" not in col_map:
+            sheet_summary.append(f"⚠️ {sheet_name}: skipped (no name column found)")
+            continue
 
-                company_col = next((c for c in df.columns if 'company' in c), None)
-                company = str(row.get(company_col, '')).strip() if company_col else ''
-                if company.lower() in ['nan', 'none']: company = ''
+        sheet_count = 0
+        for _, row in df.iterrows():
+            def get(field):
+                col = col_map.get(field)
+                if not col: return None
+                v = row.get(col)
+                return None if (v is None or safe_val(v) == "") else v
 
-                process_col = next((c for c in df.columns if 'process' in c or 'procecss' in c), None)
-                process = str(row.get(process_col, '')).strip() if process_col else ''
-                if process.lower() in ['nan', 'none']: process = ''
+            name = safe_val(get("name"))
+            if not name: continue
 
-                rec_col = next((c for c in df.columns if 'recruiter' in c), None)
-                recruiter = str(row.get(rec_col, '')).strip() if rec_col else ''
-                if recruiter.lower() in ['nan', 'none']: recruiter = ''
+            phone = clean_phone(get("phone"))
+            if not phone or len(phone) < 8: phone = "0000000000"
 
-                date_col = next((c for c in df.columns if 'selection' in c), None)
-                sel_date = parse_date(row.get(date_col, '')) if date_col else None
+            all_records.append({
+                "name":           name,
+                "phone":          phone,
+                "company":        safe_val(get("company")),
+                "designation":    safe_val(get("designation")),
+                "recruiter_name": safe_val(get("recruiter_name")),
+                "selection_date": parse_date(get("selection_date")),
+                "joining_date":   parse_date(get("joining_date")),
+                "status":         map_status(get("status")),
+                "payment_status": map_payment(get("payment_status")),
+                "source_sheet":   sheet_name,
+            })
+            sheet_count += 1
 
-                join_col = next((c for c in df.columns if 'joining' in c or 'doj' in c), None)
-                join_date = parse_date(row.get(join_col, '')) if join_col else None
+        sheet_summary.append(f"✅ {sheet_name}: {sheet_count} candidates")
 
-                status_col = next((c for c in df.columns if 'status' in c), None)
-                status = map_status(row.get(status_col, '')) if status_col else 'Selected'
+    # ── Summary & preview ──────────────────────────────────────
+    st.markdown(f"### 📊 Found **{len(all_records)} candidates** across {len(sheet_summary)} sheets")
+    for s in sheet_summary:
+        st.markdown(f"- {s}")
 
-                pay_col = next((c for c in df.columns if 'payout' in c or 'pay_out' in c), None)
-                payment_status = map_payment(row.get(pay_col, '')) if pay_col else 'Pending'
+    if not all_records:
+        st.warning("No valid candidates found. Check your file format.")
+        return
 
-                all_records.append({
-                    'name': name,
-                    'phone': phone,
-                    'company': company,
-                    'designation': process,
-                    'recruiter_name': recruiter,
-                    'selection_date': sel_date,
-                    'joining_date': join_date,
-                    'status': status,
-                    'payment_status': payment_status,
-                    'source_sheet': sheet_name,
-                })
-                sheet_count += 1
+    st.markdown("**Preview (first 10):**")
+    preview_cols = ["name", "phone", "company", "recruiter_name", "status", "payment_status", "source_sheet"]
+    st.dataframe(pd.DataFrame(all_records[:10])[preview_cols], use_container_width=True, hide_index=True)
 
-            sheet_summary.append(f"✅ {sheet_name}: {sheet_count} candidates")
+    st.markdown("---")
+    if st.button("🚀 Import All Candidates", type="primary", use_container_width=True):
+        from database.connection import get_db_session
+        from database.models import CandidateStatus as CS, PaymentStatus as PS
 
-        st.markdown(f"### 📊 Found **{len(all_records)} candidates** across {len(sheet_summary)} sheets")
-        for s in sheet_summary:
-            st.markdown(f"- {s}")
+        progress = st.progress(0)
+        status_text = st.empty()
+        success = failed = skipped = 0
 
-        st.markdown("**Preview (first 10):**")
-        preview = pd.DataFrame(all_records[:10])[['name', 'phone', 'company', 'recruiter_name', 'status', 'payment_status', 'source_sheet']]
-        st.dataframe(preview, use_container_width=True, hide_index=True)
+        session = get_db_session()
+        companies_cache = {c.name.lower(): c.id for c in session.query(Company).all()}
+        recruiters_cache = {}
+        for r, uname in session.query(Recruiter, User.full_name).join(User, Recruiter.user_id == User.id).all():
+            recruiters_cache[uname.lower()] = r.id
+        last = session.query(Candidate).order_by(Candidate.id.desc()).first()
+        counter = (last.id + 1000) if last else 1000
+        session.close()
 
-        st.markdown("---")
-        if st.button("🚀 Import All Candidates", type="primary", use_container_width=True):
-            from database.connection import get_db_session
-            from database.models import CandidateStatus as CS, PaymentStatus as PS
-
-            progress = st.progress(0)
-            status_text = st.empty()
-            success = 0
-            failed = 0
-            skipped = 0
-
+        total = len(all_records)
+        for i, rec in enumerate(all_records):
             session = get_db_session()
-            companies_cache = {c.name.lower(): c.id for c in session.query(Company).all()}
-            recruiters_cache = {}
-            for r, uname in session.query(Recruiter, User.full_name).join(User, Recruiter.user_id == User.id).all():
-                recruiters_cache[uname.lower()] = r.id
-            last = session.query(Candidate).order_by(Candidate.id.desc()).first()
-            counter = (last.id + 1000) if last else 1000
-            session.close()
+            try:
+                phone = rec["phone"]
+                if phone != "0000000000":
+                    if session.query(Candidate).filter(Candidate.phone == phone).first():
+                        skipped += 1
+                        session.close()
+                        continue
+                else:
+                    if session.query(Candidate).filter(
+                        Candidate.name == rec["name"],
+                        Candidate.notes.like(f"%{rec['source_sheet']}%")
+                    ).first():
+                        skipped += 1
+                        session.close()
+                        continue
 
-            total = len(all_records)
+                company_id = None
+                if rec["company"]:
+                    ck = rec["company"].lower()
+                    for cn, cid in companies_cache.items():
+                        if ck[:8] in cn or cn[:8] in ck:
+                            company_id = cid
+                            break
+                    if not company_id:
+                        new_c = Company(name=rec["company"], is_active=True)
+                        session.add(new_c); session.flush()
+                        company_id = new_c.id
+                        companies_cache[rec["company"].lower()] = company_id
 
-            for i, rec in enumerate(all_records):
-                session = get_db_session()
-                try:
-                    phone = rec['phone']
-                    # Check duplicate by phone
-                    if phone != '0000000000':
-                        if session.query(Candidate).filter(Candidate.phone == phone).first():
-                            skipped += 1
-                            session.close()
-                            continue
-                    # Check duplicate by name for 0000000000 phones
-                    else:
-                        existing_name = session.query(Candidate).filter(
-                            Candidate.name == rec['name'],
-                            Candidate.notes.like(f"%{rec['source_sheet']}%")
-                        ).first()
-                        if existing_name:
-                            skipped += 1
-                            session.close()
-                            continue
+                recruiter_id = None
+                if rec["recruiter_name"]:
+                    rk = rec["recruiter_name"].lower()
+                    for rn, rid in recruiters_cache.items():
+                        if rk in rn or rn in rk:
+                            recruiter_id = rid
+                            break
 
-                    company_id = None
-                    if rec['company']:
-                        comp_key = rec['company'].lower()
-                        for cached_name, cached_id in companies_cache.items():
-                            if comp_key[:8] in cached_name or cached_name[:8] in comp_key:
-                                company_id = cached_id
-                                break
-                        if not company_id:
-                            new_comp = Company(name=rec['company'], is_active=True)
-                            session.add(new_comp)
-                            session.flush()
-                            company_id = new_comp.id
-                            companies_cache[rec['company'].lower()] = company_id
-
-                    recruiter_id = None
-                    if rec['recruiter_name']:
-                        rec_key = rec['recruiter_name'].lower()
-                        for cached_name, cached_id in recruiters_cache.items():
-                            if rec_key in cached_name or cached_name in rec_key:
-                                recruiter_id = cached_id
-                                break
-
+                counter += 1
+                cid = f"CND{str(counter).zfill(5)}"
+                while session.query(Candidate).filter(Candidate.candidate_id == cid).first():
                     counter += 1
                     cid = f"CND{str(counter).zfill(5)}"
-                    while session.query(Candidate).filter(Candidate.candidate_id == cid).first():
-                        counter += 1
-                        cid = f"CND{str(counter).zfill(5)}"
 
-                    try:
-                        status_val = CS(rec['status'])
-                    except:
-                        status_val = CS.SELECTED
+                try: status_val = CS(rec["status"])
+                except: status_val = CS.SELECTED
 
-                    try:
-                        pay_val = PS(rec['payment_status'])
-                    except:
-                        pay_val = PS.PENDING
+                try: pay_val = PS(rec["payment_status"])
+                except: pay_val = PS.PENDING
 
-                    is_eligible = False
-                    if rec['joining_date']:
-                        days = (date.today() - rec['joining_date']).days
-                        is_eligible = days >= 90
+                joining = rec["joining_date"]
+                is_eligible = (date.today() - joining).days >= 90 if joining else False
 
-                    candidate = Candidate(
-                        candidate_id=cid,
-                        name=rec['name'],
-                        phone=rec['phone'],
-                        company_id=company_id,
-                        recruiter_id=recruiter_id,
-                        designation=rec['designation'],
-                        selection_date=rec['selection_date'],
-                        joining_date=rec['joining_date'],
-                        status=status_val,
-                        payment_status=pay_val,
-                        is_90_day_eligible=is_eligible,
-                        notes=f"Imported from: {rec['source_sheet']}",
-                    )
-                    session.add(candidate)
-                    session.commit()
-                    success += 1
+                candidate = Candidate(
+                    candidate_id=cid,
+                    name=rec["name"],
+                    phone=phone,
+                    company_id=company_id,
+                    recruiter_id=recruiter_id,
+                    designation=rec["designation"] or None,
+                    selection_date=rec["selection_date"],
+                    joining_date=joining,
+                    status=status_val,
+                    payment_status=pay_val,
+                    is_90_day_eligible=is_eligible,
+                    notes=f"Imported from: {rec['source_sheet']}",
+                )
+                session.add(candidate)
+                session.commit()
+                success += 1
 
-                except Exception as e:
-                    session.rollback()
-                    failed += 1
-                finally:
-                    session.close()
+            except Exception as e:
+                session.rollback()
+                failed += 1
+            finally:
+                session.close()
 
-                progress.progress((i + 1) / total)
-                status_text.markdown(f"Processing {i+1}/{total} — ✅ {success} imported, ⏭ {skipped} skipped, ❌ {failed} failed")
+            progress.progress((i + 1) / total)
+            status_text.markdown(f"Processing {i+1}/{total} — ✅ {success} imported, ⏭ {skipped} skipped, ❌ {failed} failed")
 
-            progress.progress(1.0)
-            st.success(f"✅ Done! {success} imported, {skipped} skipped, {failed} failed")
+        progress.progress(1.0)
+        st.success(f"✅ Done! {success} imported, {skipped} skipped, {failed} failed")
+        if success > 0:
             st.balloons()

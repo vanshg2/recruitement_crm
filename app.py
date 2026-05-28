@@ -353,7 +353,7 @@ else:
     if st.session_state.get("role") == "admin":
         pages = ["Dashboard", "Candidates", "Add Candidate",
                  "Recruiters", "Payments", "Companies",
-                 "Notifications", "Smart Import", "Settings"]
+                 "Notifications", "Settings"]
         icons = {
             "Dashboard":     "🏠",
             "Candidates":    "👥",
@@ -362,7 +362,6 @@ else:
             "Payments":      "💰",
             "Companies":     "🏢",
             "Notifications": "🔔",
-            "Smart Import":  "📥",
             "Settings":      "⚙️",
         }
     else:
@@ -435,12 +434,6 @@ else:
     st.markdown("---")
 
     # Page Renderer
-    try:
-        from app.ui.smart_import_page import render_smart_import_page
-    except Exception as e:
-        def render_smart_import_page():
-            st.error(f"Smart Import failed to load: {e}")
-
     page_map = {
         "Dashboard":     render_dashboard,
         "Candidates":    render_candidates,
@@ -449,7 +442,6 @@ else:
         "Payments":      render_payments,
         "Companies":     render_companies,
         "Notifications": render_notifications,
-        "Smart Import":  render_smart_import_page,
         "Settings":      render_settings,
     }
 
