@@ -403,8 +403,9 @@ else:
         with nav_cols[idx]:
             is_active = current == page
             page_icon = icons.get(page, "📄")
+            short_label = page.replace("Add Candidate", "Add").replace("Notifications", "Alerts")
             if st.button(
-                f"{page_icon} {page}",
+                f"{page_icon} {short_label}",
                 key=f"nav_{page}",
                 use_container_width=True,
                 type="primary" if is_active else "secondary",
