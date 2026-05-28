@@ -1,6 +1,6 @@
 """
 Invoice Generator UI
-BLACKWOODS CRM
+CRM
 """
 
 import streamlit as st
@@ -12,7 +12,7 @@ from app.utils.invoice_generator import generate_invoice_pdf, generate_invoice_n
 
 def render_invoice_generator():
     st.markdown("### 🧾 Generate Tax Invoice")
-    st.markdown("Generate a GST invoice in Blackwoods format for any candidate.")
+    st.markdown("Generate a GST invoice in standard format for any candidate.")
 
     # ── Step 1: Select Candidate ──────────────────
     st.markdown("**Step 1 — Select Candidate**")

@@ -1,11 +1,10 @@
 """
-BLACKWOODS CRM - Main Application Entry Point
+CRM - Main Application Entry Point
 """
 
 import streamlit as st
 import os
 import sys
-import base64
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -19,7 +18,7 @@ except:
 # ─────────────────────────────────────────────────
 
 st.set_page_config(
-    page_title="BLACKWOODS CRM",
+    page_title="CRM",
     page_icon="🎯",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -30,11 +29,8 @@ st.set_page_config(
 # ─────────────────────────────────────────────────
 
 def get_logo_b64():
-    try:
-        with open("images/logo.png", "rb") as f:
-            return base64.b64encode(f.read()).decode()
-    except:
-        return None
+    # Logo removed — replace with your new logo file at images/logo.png
+    return None
 
 # ─────────────────────────────────────────────────
 # CUSTOM CSS
@@ -347,7 +343,6 @@ if not is_authenticated():
     render_login()
 else:
     user = get_current_user()
-    logo_b64 = get_logo_b64()
 
     # Role-based navigation
     if st.session_state.get("role") == "admin":
@@ -382,10 +377,8 @@ else:
         st.session_state.current_page = "Dashboard"
 
     # Top Navbar
-    if logo_b64:
-        logo_html = f'<img src="data:image/png;base64,{logo_b64}" style="height:40px; width:auto;">'
-    else:
-        logo_html = '<span style="color:white; font-size:1.5rem;">🎯</span>'
+    # Logo placeholder — replace images/logo.png with your new logo to show it here
+    logo_html = '<span style="color:#3B82F6; font-size:1.6rem; font-weight:900; letter-spacing:0.05em;">CRM</span>'
 
     st.markdown(f"""
     <div style="
@@ -400,7 +393,7 @@ else:
     ">
         <div style="display:flex; align-items:center; gap:0.75rem;">
             {logo_html}
-            <span style="color:#F1F5F9; font-weight:800; font-size:1.1rem;">BLACKWOODS CRM</span>
+            <span style="color:#F1F5F9; font-weight:800; font-size:1.1rem;">CRM</span>
         </div>
         <div style="color:#64748B; font-size:0.8rem;">
             👤 {user['full_name']} &nbsp;|&nbsp; {user['role'].title()}

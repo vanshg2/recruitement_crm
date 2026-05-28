@@ -1,7 +1,7 @@
 """
-Invoice Generator - Blackwoods Format
+Invoice Generator - CRM Format
 Generates PDF invoices matching the company's official format
-BLACKWOODS CRM
+CRM
 """
 
 from reportlab.lib.pagesizes import A4
@@ -16,7 +16,7 @@ from datetime import date
 
 
 COMPANY_INFO = {
-    "name": "BLACKWOODS",
+    "name": "CRM",
     "gstin": "07DSOPM0015G1ZW",
     "sac_code": "998512",
     "state_code": "06",
@@ -139,7 +139,7 @@ def generate_invoice_pdf(invoice_data: dict) -> bytes:
             Paragraph("<b>To:</b>", style_bold),
             Paragraph(
                 f"<b>For:</b><br/>"
-                f"<b>BLACKWOODS</b><br/>"
+                f"<b>CRM</b><br/>"
                 f"GST NO: {COMPANY_INFO['gstin']}",
                 style_right_bold
             )

@@ -1,6 +1,6 @@
 """
 Login Page UI
-BLACKWOODS CRM
+CRM
 """
 
 import streamlit as st
@@ -8,12 +8,6 @@ import base64
 import os
 
 
-def get_logo_b64():
-    try:
-        with open("images/logo.png", "rb") as f:
-            return base64.b64encode(f.read()).decode()
-    except:
-        return None
 
 
 def render_login():
@@ -40,7 +34,7 @@ def render_login():
                 color: #F1F5F9;
                 margin: 0.75rem 0 0;
                 letter-spacing: -0.02em;
-            ">BLACKWOODS CRM</h1>
+            ">CRM</h1>
             <p style="
                 color: #64748B;
                 font-size: 0.875rem;
@@ -74,6 +68,6 @@ def render_login():
 
         st.markdown("""
         <div style="text-align:center; margin-top: 1.5rem; color: #9CA3AF; font-size: 0.75rem;">
-            © 2024 Blackwoods. All rights reserved.
+            © 2024 CRM. All rights reserved.
         </div>
         """, unsafe_allow_html=True)

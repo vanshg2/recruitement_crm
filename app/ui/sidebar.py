@@ -1,6 +1,6 @@
 """
 Sidebar Navigation
-BLACKWOODS CRM
+CRM
 """
 
 import streamlit as st
@@ -18,7 +18,7 @@ def render_sidebar() -> str:
         st.session_state.current_page = "Dashboard"
 
     with st.sidebar:
-        st.markdown(f"### 🎯 BLACKWOODS CRM")
+        st.markdown(f"### 🎯 CRM")
         st.markdown(f"👤 **{user['full_name']}** — {user['role'].title()}")
         st.markdown("---")
 
