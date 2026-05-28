@@ -376,22 +376,20 @@ else:
         st.session_state.current_page = "Dashboard"
 
     # Top Navbar
-    logo_html = '<span style="color:#3B82F6; font-size:1.1rem; font-weight:900;">Recruitment CRM</span>'
-
     st.markdown(f"""
     <div style="
         background: #0F172A;
-        padding: 0.6rem 1.5rem;
+        padding: 0.75rem 1.5rem;
         display: flex;
         align-items: center;
         justify-content: space-between;
-        margin: -3rem -4rem 1rem -4rem;
+        margin-bottom: 1rem;
         box-shadow: 0 2px 8px rgba(0,0,0,0.4);
         border-bottom: 1px solid #334155;
+        border-radius: 8px;
     ">
         <div style="display:flex; align-items:center; gap:0.75rem;">
-            {logo_html}
-            <span style="color:#F1F5F9; font-weight:800; font-size:1.1rem;">Recruitment CRM</span>
+            <span style="color:#3B82F6; font-size:1.3rem; font-weight:900; letter-spacing:0.02em;">Recruitment CRM</span>
         </div>
         <div style="color:#64748B; font-size:0.8rem;">
             👤 {user['full_name']} &nbsp;|&nbsp; {user['role'].title()}
