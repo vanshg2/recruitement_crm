@@ -87,23 +87,24 @@ def render_dashboard():
     st.markdown("<br>", unsafe_allow_html=True)
 
     # ── KPI Row 2 ────────────────────────────────
-    from app.auth.auth import is_admin
-    c1, c2, c3, c4, c5 = st.columns(5)
-    with c1:
-        if is_admin():
-            kpi_card("💰", "Amount to Collect", kpis["pending_payment"], variant="orange", prefix="₹")
-        else:
-            kpi_card("📅", "Joined This Month", kpis["month_joins"], variant="blue")
-    with c2:
-        if is_admin():
-            kpi_card("✅", "Amount Received", kpis["received_payment"], variant="green", prefix="₹")
-    with c4:
-        if is_admin():
-            kpi_card("📈", "This Month Earnings", kpis["month_revenue"], variant="green", prefix="₹")
+from app.auth.auth import is_admin
+c1, c2, c3, c4, c5 = st.columns(5)
+with c1:
+    if is_admin():
+        kpi_card("💰", "Amount to Collect", kpis["pending_payment"], variant="orange", prefix="₹")
     else:
-            kpi_card("✅", "Currently Working", kpis["joined_candidates"], variant="green")
-    with c5:
-        kpi_card("🔔", "New Alerts", kpis["unread_notifications"], variant="purple")
+        kpi_card("📅", "Joined This Month", kpis["month_joins"], variant="blue")
+with c2:
+    if is_admin():
+        kpi_card("✅", "Amount Received", kpis["received_payment"], variant="green", prefix="₹")
+with c4:
+    if is_admin():
+        kpi_card("📈", "This Month Earnings", kpis["month_revenue"], variant="green", prefix="₹")
+    else:
+        kpi_card("✅", "Currently Working", kpis["joined_candidates"], variant="green")
+with c5:
+    kpi_card("🔔", "New Alerts", kpis["unread_notifications"], variant="purple")
+st.markdown("<br>", unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
