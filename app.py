@@ -435,6 +435,12 @@ else:
     st.markdown("---")
 
     # Page Renderer
+    try:
+        from app.ui.smart_import_page import render_smart_import_page
+    except Exception as e:
+        def render_smart_import_page():
+            st.error(f"Smart Import failed to load: {e}")
+
     page_map = {
         "Dashboard":     render_dashboard,
         "Candidates":    render_candidates,
