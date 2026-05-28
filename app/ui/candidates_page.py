@@ -58,7 +58,8 @@ def render_candidates():
                     st.rerun()
 
     # Fetch Data
-       candidates = get_all_candidates(
+    st.write(f"DEBUG — role: {st.session_state.get('role')}, recruiter_id: {st.session_state.get('recruiter_id')}")
+    candidates = get_all_candidates(
         search=search,
         status_filter="" if status_filter == "All Statuses" else status_filter,
         company_id=company_opts.get(company_sel),
