@@ -246,14 +246,15 @@ def _render_table_view(candidates: list):
     for c in page_candidates:
         rows.append({
             "ID": c["candidate_id"],
-            "Name": ("🔴 " if (c["is_90_day_eligible"] and c["payment_status"] == "Pending") else "") + c["name"],
+            "Name": (("🔴 ") if (c["is_90_day_eligible"] and c["payment_status"] == "Pending") else "") + c["name"],
             "Phone": c["phone"],
             "Company": c["company_name"],
             "Recruiter": c["recruiter_name"],
             "Status": c["status"],
             "Payment": c["payment_status"],
-            "Amount (₹)": f"₹{c['payment_amount']:,.0f}" if st.session_state.get("role") == "admin" else "—",
-            "Days": c["days_since_joining"],
+            "Salary (₹)": f"₹{c['ctc']:,.0f}" if c.get("ctc") and c["ctc"] > 0 else "—",
+            "Commission (₹)": f"₹{c['payment_amount']:,.0f}" if st.session_state.get("role") == "admin" else "—",
+            "Days": c["days_since_joining"] if c["days_since_joining"] is not None else "—",
         })
 
     df = pd.DataFrame(rows)
@@ -352,7 +353,9 @@ def _render_card_view(candidates: list):
                 pay_status = c['payment_status']
                 amount = f"{c['payment_amount']:,.0f}"
                 joining = str(c['joining_date']) if c.get('joining_date') else 'Not joined yet'
-                days = c.get('days_since_joining', 0) if c.get('joining_date') else '—'
+                days = c.get('days_since_joining')
+                days_display = f"{days} days" if days is not None else "—"
+                salary = f"₹{c['ctc']:,.0f}" if c.get('ctc') and c['ctc'] > 0 else "—"
 
                 html = (
                     f'<div style="background:#1E293B;border:1px solid {border_color};'
@@ -366,11 +369,12 @@ def _render_card_view(candidates: list):
                     f'<div style="font-size:0.8rem;color:#94A3B8;margin-bottom:0.5rem;">'
                     f'📱 {phone}<br>🏢 {company}<br>👤 {recruiter}<br>'
                     f'📅 Joined: {joining}<br>'
-                    f'⏳ Days: {days} days</div>'
+                    f'💰 Salary: {salary}<br>'\
+                    f'⏳ Days: {days_display}</div>'
                     f'{alert_html}'
                     f'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:0.75rem;padding-top:0.75rem;border-top:1px solid #334155;">'
                     f'<div><span style="background:#78350F;color:#FCD34D;font-size:0.72rem;font-weight:600;padding:0.2rem 0.6rem;border-radius:999px;">{pay_status}</span>'
-                    f'<span style="font-size:0.8rem;font-weight:700;color:#10B981;margin-left:8px;">{"₹" + amount if st.session_state.get("role") == "admin" else "—"}</span></div>'
+                    f'<span style="font-size:0.8rem;font-weight:700;color:#10B981;margin-left:8px;">{"Commission: ₹" + amount if st.session_state.get("role") == "admin" else "—"}</span></div>'
                     f'<a href="{wa_link}" target="_blank" style="background:#25D366;color:white;padding:0.4rem 0.875rem;border-radius:999px;font-size:0.8rem;font-weight:600;text-decoration:none;">💬 WhatsApp</a>'
                     f'</div></div>'
                 )
