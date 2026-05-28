@@ -275,17 +275,105 @@ def _render_bulk_import():
     from datetime import datetime as dt
     from difflib import SequenceMatcher
 
+    # ── CRM field → all known column name variants ─────────────
     SYNONYMS = {
-        "name":           ["name", "full name", "candidate name", "applicant", "person", "candidate"],
-        "phone":          ["phone", "mobile", "number", "contact", "ph", "mob", "cell", "whatsapp", "phone no", "mobile no", "contact no"],
-        "company":        ["company", "organisation", "organization", "client", "employer", "firm"],
-        "designation":    ["designation", "process", "procecss", "role", "position", "job title", "post", "profile"],
-        "recruiter_name": ["recruiter", "rec", "sourced by", "consultant", "hired by"],
-        "selection_date": ["selection", "selected on", "select date", "date of selection", "dos"],
-        "joining_date":   ["joining", "doj", "date of joining", "join date", "joining date"],
-        "status":         ["status", "stage", "current status", "pipeline"],
-        "payment_status": ["payout", "pay out", "payment", "payment status", "pay out"],
+        "name": [
+            "name", "full name", "candidate name", "applicant name", "applicant",
+            "person", "candidate", "employee name", "emp name",
+        ],
+        "phone": [
+            "phone", "mobile", "number", "contact", "ph", "mob", "cell",
+            "whatsapp", "phone no", "mobile no", "contact no",
+            "phone number", "mobile number", "contact number", "ph no",
+        ],
+        "company": [
+            "company", "organisation", "organization", "client", "employer",
+            "firm", "company name", "client name", "employer name",
+            "hiring company", "client company",
+        ],
+        "designation": [
+            "designation", "process", "procecss", "role", "position",
+            "job title", "post", "profile", "job role", "job profile",
+            "dept", "department", "vertical", "campaign",
+        ],
+        "recruiter_name": [
+            "recruiter", "recruiter name", "rec", "sourced by", "consultant",
+            "hired by", "bdm", "account manager", "spoc", "rm",
+        ],
+        "selection_date": [
+            "selection", "selected on", "select date", "date of selection",
+            "dos", "selection date", "date selected", "joining month",
+        ],
+        "joining_date": [
+            "joining", "doj", "date of joining", "join date", "joining date",
+            "actual joining", "date joined", "joining month",
+        ],
+        "status": [
+            "status", "stage", "current status", "pipeline",
+            "candidate status", "emp status",
+        ],
+        "payment_status": [
+            "payout", "pay out", "payment", "payment status",
+            "pay status", "invoice status", "billing status", "pay out",
+        ],
     }
+
+    # Column names that are salary/finance — never map to text fields
+    NUMERIC_KEYWORDS = [
+        "ctc", "salary", "package", "lpa", "lakh", "annual", "gross", "net",
+        "fee", "commission", "amount", "cost", "inr", "rs ", "rupee",
+        "offered", "fixed", "variable", "incentive", "bonus", "wage",
+    ]
+    TEXT_ONLY_FIELDS = {"name", "company", "designation", "recruiter_name"}
+
+    # ── Status values from client files → CRM status values ────
+    # These map ALL the creative ways hiring companies label statuses
+    STATUS_MAP = {
+        # Active / in pipeline → Selected
+        "active": "Selected",
+        "selected": "Selected",
+        "shortlisted": "Selected",
+        "in process": "Selected",
+        "offered": "Selected",
+        "pending": "Selected",
+        "yet to join": "Selected",
+        "not joined": "Selected",
+        "": "Selected",
+        # Joined
+        "joined": "Joined",
+        "on board": "Joined",
+        "onboard": "Joined",
+        "onboarded": "Joined",
+        "working": "Joined",
+        "confirmed": "Joined",
+        # Drop
+        "drop": "Drop",
+        "dropout": "Drop",
+        "no show": "Drop",
+        "no-show": "Drop",
+        "not joined": "Drop",
+        "absconded": "Drop",
+        "rejected": "Drop",
+        "declined": "Drop",
+        "withdrew": "Drop",
+        "replace": "Drop",
+        # Payment received
+        "paid": "Payment Received",
+        "payment done": "Payment Received",
+        "invoice paid": "Payment Received",
+    }
+
+    # Payout column values — can encode EITHER status OR payment_status
+    PAYOUT_AS_PAYMENT = {
+        "paid": "Received",
+        "unpaid": "Pending",
+        "not paid": "Pending",
+        "pending": "Pending",
+        "due": "Pending",
+        "invoice raised": "Pending",
+    }
+    # Payout values that actually mean STATUS not payment
+    PAYOUT_IS_STATUS = {"drop", "dropout", "replace", "no show", "absconded"}
 
     def _norm(s):
         return re.sub(r"[^a-z0-9 ]", " ", str(s).lower()).strip()
@@ -297,65 +385,149 @@ def _render_bulk_import():
             ratio = max(ratio, 0.85)
         return ratio
 
-    def detect_columns(cols):
-        mapping = {}
-        used = set()
+    def _looks_like_phone_header(val):
+        """Return True if a header cell looks like a phone number (leaked into headers)."""
+        if val is None:
+            return False
+        s = re.sub(r"[\s\(\)\-\+]", "", str(val))
+        digits = re.sub(r"\D", "", s)
+        return len(digits) >= 8 and len(digits) <= 13
+
+    def _is_numeric_col(col_name, series):
+        """True if column name implies salary/finance OR data is mostly large numbers."""
+        n = _norm(col_name)
+        for kw in NUMERIC_KEYWORDS:
+            if kw in n:
+                return True
+        try:
+            nums = pd.to_numeric(series.dropna(), errors="coerce").dropna()
+            if len(nums) == 0:
+                return False
+            if (len(nums) / max(len(series.dropna()), 1)) > 0.6 and nums.median() > 1000:
+                return True
+        except Exception:
+            pass
+        return False
+
+    def detect_columns(cols, df_sample):
+        """
+        Global best-score assignment:
+        1. Build full (field × col) score matrix
+        2. Block numeric/salary cols from text-only fields
+        3. Assign highest-score pairs first, no reuse of col or field
+        4. Threshold 0.72 — high enough to avoid false positives
+        """
+        scores = {}
         for field, syns in SYNONYMS.items():
-            best_col, best_score = None, 0.0
             for col in cols:
-                if col in used:
-                    continue
-                for syn in syns:
-                    s = _score(col, syn)
-                    if s > best_score:
-                        best_score = s
-                        best_col = col
-            if best_score >= 0.60 and best_col:
-                mapping[field] = best_col
-                used.add(best_col)
+                best = max(_score(col, syn) for syn in syns)
+                if field in TEXT_ONLY_FIELDS:
+                    series = df_sample[col] if col in df_sample.columns else pd.Series()
+                    if _is_numeric_col(col, series):
+                        best = 0.0
+                scores[(field, col)] = best
+
+        mapping = {}
+        used_cols = set()
+        for (field, col), score in sorted(scores.items(), key=lambda x: x[1], reverse=True):
+            if score < 0.72:
+                break
+            if field in mapping or col in used_cols:
+                continue
+            mapping[field] = col
+            used_cols.add(col)
         return mapping
 
     def safe_val(v):
         try:
-            if v is None: return ""
+            if v is None:
+                return ""
             s = str(v).strip()
             return "" if s.lower() in ["nan", "none", "nat", ""] else s
-        except: return ""
+        except Exception:
+            return ""
 
     def parse_date(val):
         s = safe_val(val)
-        if not s: return None
+        if not s:
+            return None
         s = re.sub(r"(\d+)(st|nd|rd|th)", r"\1", s, flags=re.IGNORECASE).strip()
-        for fmt in ["%d %B %Y", "%d %b %Y", "%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y", "%d %B", "%d %b"]:
+        for fmt in ["%d %B %Y", "%d %b %Y", "%Y-%m-%d", "%d/%m/%Y",
+                    "%m/%d/%Y", "%d-%m-%Y", "%d %B", "%d %b", "%B %Y", "%b %Y"]:
             try:
                 d = dt.strptime(s, fmt)
+                # Month-only formats (no day) → use 1st of that month
+                if fmt in ("%B %Y", "%b %Y"):
+                    return d.date()
                 return d.replace(year=dt.now().year).date() if d.year == 1900 else d.date()
-            except: continue
+            except Exception:
+                continue
         return None
 
     def clean_phone(val):
         s = safe_val(val)
-        if not s: return ""
+        if not s:
+            return ""
         s = re.sub(r"\D", "", s)
-        if s.startswith("91") and len(s) == 12: s = s[2:]
-        if s.startswith("0") and len(s) == 11: s = s[1:]
+        # Strip negative sign artifact (Excel stores phone as negative number)
+        s = s.lstrip("-")
+        if s.startswith("91") and len(s) == 12:
+            s = s[2:]
+        if s.startswith("0") and len(s) == 11:
+            s = s[1:]
         return s[-10:] if len(s) >= 10 else s
 
-    def map_status(val):
-        s = safe_val(val).lower()
-        if not s: return "Selected"
-        if "drop" in s: return "Drop"
-        if "paid" in s: return "Payment Received"
-        if "join" in s: return "Joined"
+    def resolve_status(status_val, payout_val):
+        """
+        Intelligently resolve CRM status from whatever the client file provides.
+        Some sheets have no Status column — status must be inferred from Payout.
+        Some Payout values are actually status signals (Drop, Replace).
+        """
+        sv = _norm(safe_val(status_val))
+        pv = _norm(safe_val(payout_val))
+
+        # If explicit status column has a value, use it
+        if sv:
+            for key, crm_val in STATUS_MAP.items():
+                if key and key in sv:
+                    return crm_val
+            return "Selected"
+
+        # No status column — infer from payout
+        if pv in PAYOUT_IS_STATUS:
+            return "Drop"
+        if "join" in pv:
+            return "Joined"
+        # Empty payout or payment-only values → still Selected
         return "Selected"
 
-    def map_payment(val):
-        s = safe_val(val).lower()
-        if not s: return "Pending"
-        if s == "paid": return "Received"
+    def resolve_payment(payout_val, status_val):
+        """
+        Resolve payment status.
+        Skip if payout value is actually a status signal.
+        Numeric payout values = amount, not status → default Pending.
+        """
+        pv = _norm(safe_val(payout_val))
+        if not pv:
+            return "Pending"
+        # Payout value is a status, not a payment
+        if pv in PAYOUT_IS_STATUS:
+            return "Pending"
+        # Numeric value = payout amount, not payment status
+        if re.match(r"^\d+(\.\d+)?$", pv.replace(" ", "")):
+            return "Pending"
+        for key, crm_val in PAYOUT_AS_PAYMENT.items():
+            if key in pv:
+                return crm_val
         return "Pending"
 
-    st.info("📤 Upload any Excel or CSV file — column names are detected automatically.")
+    # ═══════════════════════════════════════════════════════════
+    # UI
+    # ═══════════════════════════════════════════════════════════
+    st.info(
+        "📤 Upload any Excel or CSV file — the system auto-detects columns regardless of format. "
+        "Review the mapping below and fix anything before importing."
+    )
 
     uploaded = st.file_uploader("Upload Excel / CSV File", type=["xlsx", "xls", "csv"])
     if not uploaded:
@@ -373,27 +545,153 @@ def _render_bulk_import():
                 try:
                     wb = openpyxl.load_workbook(io.BytesIO(file_bytes), **kwargs)
                     break
-                except: continue
+                except Exception:
+                    continue
             if wb is None:
                 st.error("Could not open the Excel file. Please re-save it and try again.")
                 return
+
             xl = {}
             for sheet in wb.sheetnames:
                 try:
                     ws = wb[sheet]
                     data = list(ws.values)
-                    if not data: continue
-                    cols_raw = data[0]
-                    cols = [str(c).strip() if c is not None and str(c).strip() not in ["", "None"] else f"col_{i}" for i, c in enumerate(cols_raw)]
-                    rows = [[str(v).strip() if v is not None else "" for v in row] for row in data[1:]]
-                    xl[sheet] = pd.DataFrame(rows, columns=cols)
-                except: continue
+                    if not data:
+                        continue
+
+                    cols_raw = list(data[0])
+
+                    # ── Fix: detect phone numbers leaked into header row ──
+                    # (e.g. April sheet where col[1] = -7068217575)
+                    for i, c in enumerate(cols_raw):
+                        if _looks_like_phone_header(c):
+                            # Scan nearby cols to guess what this should have been
+                            cols_raw[i] = "Number"
+
+                    # ── Fix: detect two tables side-by-side (December) ──
+                    # If duplicate column names exist, split at the first duplicate
+                    seen = {}
+                    split_at = None
+                    clean_cols = []
+                    for i, c in enumerate(cols_raw):
+                        label = str(c).strip() if c is not None and str(c).strip() not in ["", "None"] else f"col_{i}"
+                        if label in seen and split_at is None and label != f"col_{i}":
+                            split_at = i
+                            break
+                        seen[label] = i
+                        clean_cols.append(label)
+
+                    # Primary table
+                    rows_all = data[1:]
+                    rows_primary = [[str(v).strip() if v is not None else "" for v in row[:len(clean_cols)]] for row in rows_all]
+                    df_primary = pd.DataFrame(rows_primary, columns=clean_cols)
+                    xl[sheet] = df_primary
+
+                    # Secondary table (if two tables side-by-side)
+                    if split_at is not None:
+                        cols2_raw = list(data[0])[split_at:]
+                        cols2 = [
+                            str(c).strip() if c is not None and str(c).strip() not in ["", "None"] else f"col_{i}"
+                            for i, c in enumerate(cols2_raw)
+                        ]
+                        rows2 = [[str(v).strip() if v is not None else "" for v in row[split_at:]] for row in rows_all]
+                        df2 = pd.DataFrame(rows2, columns=cols2)
+                        if not df2.dropna(how="all").empty:
+                            xl[f"{sheet} (part 2)"] = df2
+
+                except Exception:
+                    continue
+
     except Exception as e:
         st.error(f"Error reading file: {e}")
         return
 
-    usable = {k: v for k, v in xl.items() if "collective" not in k.strip().lower() and not v.dropna(how="all").empty}
+    usable = {
+        k: v for k, v in xl.items()
+        if "collective" not in k.strip().lower() and not v.dropna(how="all").empty
+    }
+    if not usable:
+        st.warning("No usable sheets found in this file.")
+        return
+
     st.success(f"✅ File loaded — {len(usable)} sheet(s): {', '.join(usable.keys())}")
+
+    # ── Column mapping review ──────────────────────────────────
+    FIELD_LABELS = {
+        "name":           "👤 Candidate Name  *",
+        "phone":          "📞 Phone Number",
+        "company":        "🏢 Company",
+        "designation":    "💼 Designation / Role",
+        "recruiter_name": "🙋 Recruiter",
+        "selection_date": "📅 Selection Date",
+        "joining_date":   "📅 Joining Date",
+        "status":         "🔖 Status",
+        "payment_status": "💰 Payout / Payment",
+    }
+
+    first_sheet = list(usable.keys())[0]
+    first_df = usable[first_sheet].dropna(how="all")
+    first_cols = [str(c).strip() for c in first_df.columns]
+    auto_map = detect_columns(first_cols, first_df)
+
+    st.markdown("### 🗂️ Column Mapping")
+    st.caption(
+        "Auto-detected from your file. Fix any wrong mapping before importing — "
+        "changes apply to all sheets."
+    )
+
+    col_options = ["— skip this field —"] + first_cols
+    mapping_key = f"col_mapping_{uploaded.name}"
+    if mapping_key not in st.session_state:
+        st.session_state[mapping_key] = {
+            field: auto_map.get(field, "— skip this field —")
+            for field in FIELD_LABELS
+        }
+
+    fields = list(FIELD_LABELS.keys())
+    confirmed_map = {}
+    for row_fields in [fields[i:i+3] for i in range(0, len(fields), 3)]:
+        grid_cols = st.columns(3)
+        for i, field in enumerate(row_fields):
+            with grid_cols[i]:
+                current = st.session_state[mapping_key].get(field, "— skip this field —")
+                if current not in col_options:
+                    current = "— skip this field —"
+                chosen = st.selectbox(
+                    FIELD_LABELS[field],
+                    col_options,
+                    index=col_options.index(current),
+                    key=f"map_{mapping_key}_{field}",
+                )
+                st.session_state[mapping_key][field] = chosen
+                if chosen != "— skip this field —":
+                    confirmed_map[field] = chosen
+
+    if "name" not in confirmed_map:
+        st.error("⚠️ Candidate Name column is required.")
+        return
+
+    # ── Live preview of mapped values ─────────────────────────
+    with st.expander("👁️ Preview — first 5 rows as they will be imported", expanded=True):
+        sample_rows = []
+        for _, row in first_df.head(5).iterrows():
+            status_raw = row.get(confirmed_map.get("status", ""), "")
+            payout_raw = row.get(confirmed_map.get("payment_status", ""), "")
+            sample_rows.append({
+                "Name":         safe_val(row.get(confirmed_map.get("name", ""), "")),
+                "Phone":        clean_phone(row.get(confirmed_map.get("phone", ""), "")) or "—",
+                "Company":      safe_val(row.get(confirmed_map.get("company", ""), "")) or "—",
+                "Designation":  safe_val(row.get(confirmed_map.get("designation", ""), "")) or "—",
+                "Recruiter":    safe_val(row.get(confirmed_map.get("recruiter_name", ""), "")) or "—",
+                "Sel. Date":    str(parse_date(row.get(confirmed_map.get("selection_date", ""), "")) or "—"),
+                "Join Date":    str(parse_date(row.get(confirmed_map.get("joining_date", ""), "")) or "—"),
+                "→ Status":     resolve_status(status_raw, payout_raw),
+                "→ Payment":    resolve_payment(payout_raw, status_raw),
+            })
+        if sample_rows:
+            st.dataframe(pd.DataFrame(sample_rows), use_container_width=True, hide_index=True)
+
+    st.markdown("---")
 
     # ── Parse all sheets ───────────────────────────────────────
     all_records = []
@@ -401,26 +699,45 @@ def _render_bulk_import():
 
     for sheet_name, df in usable.items():
         df = df.dropna(how="all")
-        orig_cols = [str(c).strip() for c in df.columns]
-        col_map = detect_columns(orig_cols)
+        available_cols = set(str(c).strip() for c in df.columns)
 
-        if "name" not in col_map:
+        # Per-sheet mapping: prefer user-confirmed col names,
+        # fall back to auto-detect for sheets with different column names
+        if sheet_name == first_sheet:
+            sheet_map = confirmed_map.copy()
+        else:
+            sheet_cols = [str(c).strip() for c in df.columns]
+            sheet_auto = detect_columns(sheet_cols, df)
+            sheet_map = {}
+            for field, col in confirmed_map.items():
+                if col in available_cols:
+                    sheet_map[field] = col          # same col name exists → use it
+                elif field in sheet_auto:
+                    sheet_map[field] = sheet_auto[field]   # re-detect for this sheet
+
+        if "name" not in sheet_map:
             sheet_summary.append(f"⚠️ {sheet_name}: skipped (no name column found)")
             continue
 
         sheet_count = 0
         for _, row in df.iterrows():
-            def get(field):
-                col = col_map.get(field)
-                if not col: return None
-                v = row.get(col)
+            def get(field, _row=row, _map=sheet_map):
+                col = _map.get(field)
+                if not col:
+                    return None
+                v = _row.get(col)
                 return None if (v is None or safe_val(v) == "") else v
 
             name = safe_val(get("name"))
-            if not name: continue
+            if not name:
+                continue
 
             phone = clean_phone(get("phone"))
-            if not phone or len(phone) < 8: phone = "0000000000"
+            if not phone or len(phone) < 8:
+                phone = "0000000000"
+
+            status_raw  = get("status")
+            payout_raw  = get("payment_status")
 
             all_records.append({
                 "name":           name,
@@ -430,8 +747,8 @@ def _render_bulk_import():
                 "recruiter_name": safe_val(get("recruiter_name")),
                 "selection_date": parse_date(get("selection_date")),
                 "joining_date":   parse_date(get("joining_date")),
-                "status":         map_status(get("status")),
-                "payment_status": map_payment(get("payment_status")),
+                "status":         resolve_status(status_raw, payout_raw),
+                "payment_status": resolve_payment(payout_raw, status_raw),
                 "source_sheet":   sheet_name,
             })
             sheet_count += 1
@@ -444,11 +761,12 @@ def _render_bulk_import():
         st.markdown(f"- {s}")
 
     if not all_records:
-        st.warning("No valid candidates found. Check your file format.")
+        st.warning("No valid candidates found. Check your column mapping above.")
         return
 
-    st.markdown("**Preview (first 10):**")
-    preview_cols = ["name", "phone", "company", "recruiter_name", "status", "payment_status", "source_sheet"]
+    preview_cols = ["name", "phone", "company", "designation", "recruiter_name",
+                    "status", "payment_status", "source_sheet"]
+    st.markdown("**Preview (first 10 parsed records):**")
     st.dataframe(pd.DataFrame(all_records[:10])[preview_cols], use_container_width=True, hide_index=True)
 
     st.markdown("---")
