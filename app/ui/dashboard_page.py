@@ -1,6 +1,6 @@
 """
 Dashboard Page
-BLACKWOODS CRM
+Recruitment CRM
 """
 
 import streamlit as st

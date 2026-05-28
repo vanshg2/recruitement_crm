@@ -1,6 +1,6 @@
 """
 Payments Tracking Page
-BLACKWOODS CRM
+Recruitment CRM
 """
 
 import streamlit as st
@@ -223,7 +223,7 @@ def _render_pending_payments():
                 f"As per our agreement, the placement fee of Rs.{amount_str} "
                 f"is now due.\n\n"
                 f"Kindly arrange the payment at the earliest.\n\n"
-                f"Thank you,\nBlackwoods Team"
+                f"Thank you,\nRecruitment CRM Team"
             )
             company_email = row["company_email"]
             gmail_url = f"https://mail.google.com/mail/?view=cm&to={company_email}&su={email_subject}&body={email_body}"

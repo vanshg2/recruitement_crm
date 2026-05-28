@@ -4,8 +4,6 @@ Recruitment CRM
 """
 
 import streamlit as st
-import os
-
 
 
 def render_login():
@@ -14,31 +12,18 @@ def render_login():
     with col2:
         st.markdown("<br><br>", unsafe_allow_html=True)
 
-        logo_html = '<div style="font-size:1.6rem; font-weight:900; color:#3B82F6; text-align:center; letter-spacing:0.05em; margin-bottom:1rem;">Recruitment CRM</div>'
-        else:
-            logo_html = '<div style="font-size:3rem; text-align:center; margin-bottom:1rem;">🎯</div>'
-
-        st.markdown(f"""
+        st.markdown("""
         <div style="text-align:center; margin-bottom: 2rem;">
-            {logo_html}
-            <h1 style="
-                font-family: 'Plus Jakarta Sans', sans-serif;
-                font-size: 1.75rem;
-                font-weight: 800;
-                color: #F1F5F9;
-                margin: 0.75rem 0 0;
-                letter-spacing: -0.02em;
-            ">Recruitment CRM</h1>
-            <p style="
-                color: #64748B;
-                font-size: 0.875rem;
-                margin: 0.4rem 0 0;
-                font-weight: 500;
-            ">Recruitment Management System</p>
+            <div style="font-size:1.8rem; font-weight:900; color:#3B82F6;
+                        text-align:center; letter-spacing:0.05em;
+                        margin-bottom:0.5rem;">Recruitment CRM</div>
+            <p style="color:#64748B; font-size:0.875rem;
+                      margin:0.4rem 0 0; font-weight:500;">
+                Recruitment Management System
+            </p>
         </div>
         """, unsafe_allow_html=True)
 
-        # Login Form
         st.markdown("**Sign in to your account**")
 
         with st.form("login_form", clear_on_submit=False):
@@ -61,7 +46,8 @@ def render_login():
                         st.error(f"❌ {msg}")
 
         st.markdown("""
-        <div style="text-align:center; margin-top: 1.5rem; color: #9CA3AF; font-size: 0.75rem;">
+        <div style="text-align:center; margin-top:1.5rem;
+                    color:#9CA3AF; font-size:0.75rem;">
             © 2025 Recruitment CRM. All rights reserved.
         </div>
         """, unsafe_allow_html=True)

@@ -1,6 +1,6 @@
 """
 Companies Management Page
-BLACKWOODS CRM
+Recruitment CRM
 """
 
 import streamlit as st
