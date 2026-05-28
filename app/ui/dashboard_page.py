@@ -9,6 +9,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
 from datetime import date
+from app.auth.auth import is_admin
 from app.dashboard.analytics import (
     get_dashboard_kpis, get_monthly_trend, get_status_distribution,
     get_company_pipeline, get_recruiter_performance, get_upcoming_90day_alerts,
